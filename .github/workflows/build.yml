@@ -1,0 +1,55 @@
+name: Build SwitchDisplay
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET / MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore NuGet packages
+        run: nuget restore SwitchDisplay.sln
+
+      - name: Build Release
+        run: msbuild SwitchDisplay.sln /p:Configuration=Release /p:Platform="Any CPU"
+
+      - name: Package as .pext
+        shell: pwsh
+        run: |
+          $outDir  = "bin\Release"
+          $pextDir = "pext_staging\SwitchDisplay_${{ github.run_number }}"
+
+          # Copy compiled output
+          New-Item -ItemType Directory -Force -Path $pextDir | Out-Null
+          Copy-Item "$outDir\*" $pextDir -Recurse
+
+          # Copy required Playnite extension metadata files
+          Copy-Item "extension.yaml" $pextDir -Force
+          Copy-Item "icon.png"       $pextDir -Force
+          Copy-Item "manifest.yaml"  $pextDir -ErrorAction SilentlyContinue -Force
+
+          # Copy Localization folder if it exists
+          if (Test-Path "Localization") {
+            Copy-Item "Localization" $pextDir -Recurse -Force
+          }
+
+          # Zip into .pext (Playnite extension format is just a renamed zip)
+          $pextFile = "SwitchDisplay_${{ github.run_number }}.pext"
+          Compress-Archive -Path "$pextDir\*" -DestinationPath $pextFile -Force
+          Write-Host "Created $pextFile"
+
+      - name: Upload .pext artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwitchDisplay-pext
+          path: "*.pext"
+          retention-days: 30
