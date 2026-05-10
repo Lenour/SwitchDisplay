@@ -1,9 +1,6 @@
-﻿using System.Windows.Controls;
-using System;
-using System.Windows;
-using NAudio.CoreAudioApi;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
+using System.Windows;
+using System.Windows.Controls;
 
 namespace SwitchDisplay
 {
@@ -17,23 +14,56 @@ namespace SwitchDisplay
             InitializeComponent();
         }
 
+        // ---- Always-disable-in-TV list -------------------------------------------------------
+
+        private void AddDisableInFullscreen_Click(object sender, RoutedEventArgs e)
+        {
+            var item = DisableInFullscreenCombo.SelectedItem;
+            if (item == null) return;
+            var kv = (KeyValuePair<string, string>)item;
+            settings.AddDisableInFullscreen(kv.Key, kv.Value);
+        }
+
+        private void RemoveDisableInFullscreen_Click(object sender, RoutedEventArgs e)
+        {
+            settings.RemoveDisableInFullscreenAt(DisableInFullscreenListBox.SelectedIndex);
+        }
+
+        // ---- Preserve-state list -------------------------------------------------------------
+
+        private void AddPreserveState_Click(object sender, RoutedEventArgs e)
+        {
+            var item = PreserveStateCombo.SelectedItem;
+            if (item == null) return;
+            var kv = (KeyValuePair<string, string>)item;
+            settings.AddPreserveState(kv.Key, kv.Value);
+        }
+
+        private void RemovePreserveState_Click(object sender, RoutedEventArgs e)
+        {
+            settings.RemovePreserveStateAt(PreserveStateListBox.SelectedIndex);
+        }
+
+        // ---- Audio device list ---------------------------------------------------------------
+
         private void AddFullscreenAudioDevice_Click(object sender, RoutedEventArgs e)
         {
-            var device =((ComboBox)FullscreenAudioDeviceList).SelectedItem;
-            if(device != null)
-            {
-                settings.AddFullscreenDeviceById(((KeyValuePair<string, string>)device).Key, ((KeyValuePair<string, string>)device).Value);
-            }
-
+            var item = FullscreenAudioDeviceList.SelectedItem;
+            if (item == null) return;
+            var kv = (KeyValuePair<string, string>)item;
+            settings.AddFullscreenDeviceById(kv.Key, kv.Value);
         }
+
         private void MoveAudioDeviceUp_Click(object sender, RoutedEventArgs e)
         {
             settings.MoveFullscreenDeviceUp(DevicesOrderList.SelectedIndex);
         }
+
         private void MoveAudioDeviceDown_Click(object sender, RoutedEventArgs e)
         {
             settings.MoveFullscreenDeviceDown(DevicesOrderList.SelectedIndex);
         }
+
         private void RemoveAudioDevice_Click(object sender, RoutedEventArgs e)
         {
             settings.RemoveFullscreenDeviceByIndex(DevicesOrderList.SelectedIndex);

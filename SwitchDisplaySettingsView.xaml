@@ -1,40 +1,172 @@
-﻿<UserControl x:Class="SwitchDisplay.SwitchDisplaySettingsView"
+<UserControl x:Class="SwitchDisplay.SwitchDisplaySettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              mc:Ignorable="d"
-             d:DesignHeight="400" d:DesignWidth="600">
-    <StackPanel>
-        <CheckBox IsChecked="{Binding SwitchDisplays}" Content="{DynamicResource LOCSwitchDisplaySwitchDisplays}" />
-        <TextBlock Text="{DynamicResource LOCSwitchDisplayFullscreenDisplay}"/>
-        <ComboBox ItemsSource="{Binding EnumerateDisplays}" SelectedValue="{Binding FullscreenDisplay, Mode=TwoWay}" SelectedValuePath="Key" DisplayMemberPath="Value" />
-        <TextBlock Text="{DynamicResource LOCSwitchDisplayDefaultDisplay}"/>
-        <ComboBox ItemsSource="{Binding EnumerateDisplays}" SelectedValue="{Binding DefaultDisplay, Mode=TwoWay}" SelectedValuePath="Key" DisplayMemberPath="Value" />
-        <Separator Height="10" Margin="0"/>
-        <CheckBox IsChecked="{Binding SwitchAudio}" Content="{DynamicResource LOCSwitchDisplaySwitchAudio}" />
-        <TextBlock Text="{DynamicResource LOCSwitchDisplayFullscreenAudioOutput}"/>
-        <Grid HorizontalAlignment="Stretch">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="100"/>
-            </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition />
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
-            <ListBox Grid.Column="0" Grid.Row="0" Name="DevicesOrderList"  HorizontalAlignment="Stretch" VerticalAlignment="Stretch"  ItemsSource="{Binding FullScreenAudioDeviceList}" DisplayMemberPath="Value" SelectionMode="Single" Height="120" Margin="0,0,0,5"/>
-            <WrapPanel Grid.Column="1" Grid.Row="0" HorizontalAlignment="Stretch" Height="100" VerticalAlignment="Top" Orientation="Vertical" Width="150">
-                <Button x:Name="MoveAudioDeviceUp" Content="{DynamicResource LOCSwitchDisplayUp}" HorizontalAlignment="Stretch" Click="MoveAudioDeviceUp_Click"/>
-                <Button x:Name="MoveAudioDeviceDown" Content="{DynamicResource LOCSwitchDisplayDown}" HorizontalAlignment="Stretch" Click="MoveAudioDeviceDown_Click"/>
-                <Button x:Name="RemoveAudioDevice" Content="{DynamicResource LOCSwitchDisplayRemove}" Click="RemoveAudioDevice_Click" Width="100"/>
-            </WrapPanel>
-            <ComboBox  Grid.Column="0" Grid.Row="1" x:Name="FullscreenAudioDeviceList" HorizontalAlignment="Stretch" ItemsSource="{Binding EnumerateAudioDevices, Mode=OneWay}" SelectedValuePath="Key" DisplayMemberPath="Value" VerticalAlignment="Top"/>
-            <Button  Grid.Column="1" Grid.Row="1" Name="AddFullscreenAudioDevice" Content="{DynamicResource LOCSwitchDisplayAdd}" HorizontalAlignment="Stretch" Click="AddFullscreenAudioDevice_Click" Width="100"/>
-        </Grid>
-        <TextBlock Text="{DynamicResource LOCSwitchDisplayDefaultAudioOutput}"/>
-        <ComboBox ItemsSource="{Binding EnumerateAudioDevices}" SelectedValue="{Binding DefaultAudioDevice, Mode=TwoWay}" SelectedValuePath="Key" DisplayMemberPath="Value" />
-        <Separator Height="5" Margin="0"/>
-        <CheckBox IsChecked="{Binding AutoDetectAudioDevice}" Content="{DynamicResource LOCSwitchDisplayAutoDetectAudioOutput}" />
-    </StackPanel>
+             d:DesignHeight="700" d:DesignWidth="620">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="8">
+
+            <!-- ═══ DISPLAY SECTION ═══ -->
+            <CheckBox IsChecked="{Binding SwitchDisplays}"
+                      Content="{DynamicResource LOCSwitchDisplaySwitchDisplays}"
+                      Margin="0,0,0,6"/>
+
+            <TextBlock Text="{DynamicResource LOCSwitchDisplayFullscreenDisplay}" Margin="0,0,0,2"/>
+            <ComboBox ItemsSource="{Binding EnumerateDisplays}"
+                      SelectedValue="{Binding FullscreenDisplay, Mode=TwoWay}"
+                      SelectedValuePath="Key" DisplayMemberPath="Value"
+                      Margin="0,0,0,6"/>
+
+            <TextBlock Text="{DynamicResource LOCSwitchDisplayDefaultDisplay}" Margin="0,0,0,2"/>
+            <ComboBox ItemsSource="{Binding EnumerateDisplays}"
+                      SelectedValue="{Binding DefaultDisplay, Mode=TwoWay}"
+                      SelectedValuePath="Key" DisplayMemberPath="Value"
+                      Margin="0,0,0,6"/>
+
+            <!-- Monitors always disabled in TV mode -->
+            <TextBlock Text="{DynamicResource LOCSwitchDisplayDisableInFullscreen}" Margin="0,4,0,2"/>
+            <Grid HorizontalAlignment="Stretch" Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="110"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="80"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <ListBox Grid.Column="0" Grid.Row="0"
+                         x:Name="DisableInFullscreenListBox"
+                         ItemsSource="{Binding DisableInFullscreenList}"
+                         DisplayMemberPath="Value"
+                         SelectionMode="Single"/>
+                <Button Grid.Column="1" Grid.Row="0"
+                        Content="{DynamicResource LOCSwitchDisplayRemove}"
+                        VerticalAlignment="Top" Margin="4,0,0,0"
+                        Click="RemoveDisableInFullscreen_Click" Width="100"/>
+                <ComboBox Grid.Column="0" Grid.Row="1"
+                          x:Name="DisableInFullscreenCombo"
+                          ItemsSource="{Binding EnumerateAllDisplays, Mode=OneWay}"
+                          SelectedValuePath="Key" DisplayMemberPath="Value"
+                          Margin="0,4,0,0"/>
+                <Button Grid.Column="1" Grid.Row="1"
+                        Content="{DynamicResource LOCSwitchDisplayAdd}"
+                        Margin="4,4,0,0"
+                        Click="AddDisableInFullscreen_Click" Width="100"/>
+            </Grid>
+
+            <!-- Monitors with preserved state (e.g. third monitor) -->
+            <TextBlock Text="{DynamicResource LOCSwitchDisplayPreserveState}" Margin="0,4,0,2"/>
+            <TextBlock Text="{DynamicResource LOCSwitchDisplayPreserveStateHint}"
+                       FontStyle="Italic" Foreground="Gray" FontSize="11"
+                       TextWrapping="Wrap" Margin="0,0,0,4"/>
+            <Grid HorizontalAlignment="Stretch" Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="110"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="80"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <ListBox Grid.Column="0" Grid.Row="0"
+                         x:Name="PreserveStateListBox"
+                         ItemsSource="{Binding PreserveStateList}"
+                         DisplayMemberPath="Value"
+                         SelectionMode="Single"/>
+                <Button Grid.Column="1" Grid.Row="0"
+                        Content="{DynamicResource LOCSwitchDisplayRemove}"
+                        VerticalAlignment="Top" Margin="4,0,0,0"
+                        Click="RemovePreserveState_Click" Width="100"/>
+                <ComboBox Grid.Column="0" Grid.Row="1"
+                          x:Name="PreserveStateCombo"
+                          ItemsSource="{Binding EnumerateAllDisplays, Mode=OneWay}"
+                          SelectedValuePath="Key" DisplayMemberPath="Value"
+                          Margin="0,4,0,0"/>
+                <Button Grid.Column="1" Grid.Row="1"
+                        Content="{DynamicResource LOCSwitchDisplayAdd}"
+                        Margin="4,4,0,0"
+                        Click="AddPreserveState_Click" Width="100"/>
+            </Grid>
+
+            <!-- Activation delay -->
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <TextBlock Text="{DynamicResource LOCSwitchDisplayActivationDelay}"
+                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox Text="{Binding DisplayActivationDelaySecs, Mode=TwoWay}"
+                         Width="50" VerticalAlignment="Center"/>
+                <TextBlock Text="s" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            </StackPanel>
+
+            <Separator Height="10" Margin="0,8"/>
+
+            <!-- ═══ AUDIO SECTION ═══ -->
+            <CheckBox IsChecked="{Binding SwitchAudio}"
+                      Content="{DynamicResource LOCSwitchDisplaySwitchAudio}"
+                      Margin="0,0,0,6"/>
+
+            <TextBlock Text="{DynamicResource LOCSwitchDisplayFullscreenAudioOutput}" Margin="0,0,0,2"/>
+            <Grid HorizontalAlignment="Stretch">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="110"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <ListBox Grid.Column="0" Grid.Row="0"
+                         x:Name="DevicesOrderList"
+                         ItemsSource="{Binding FullScreenAudioDeviceList}"
+                         DisplayMemberPath="Value"
+                         SelectionMode="Single" Height="100" Margin="0,0,0,4"/>
+                <WrapPanel Grid.Column="1" Grid.Row="0"
+                           Orientation="Vertical" Width="100"
+                           VerticalAlignment="Top" Margin="4,0,0,0">
+                    <Button x:Name="MoveAudioDeviceUp"
+                            Content="{DynamicResource LOCSwitchDisplayUp}"
+                            HorizontalAlignment="Stretch"
+                            Click="MoveAudioDeviceUp_Click"/>
+                    <Button x:Name="MoveAudioDeviceDown"
+                            Content="{DynamicResource LOCSwitchDisplayDown}"
+                            HorizontalAlignment="Stretch"
+                            Click="MoveAudioDeviceDown_Click"/>
+                    <Button x:Name="RemoveAudioDevice"
+                            Content="{DynamicResource LOCSwitchDisplayRemove}"
+                            HorizontalAlignment="Stretch"
+                            Click="RemoveAudioDevice_Click"/>
+                </WrapPanel>
+                <ComboBox Grid.Column="0" Grid.Row="1"
+                          x:Name="FullscreenAudioDeviceList"
+                          ItemsSource="{Binding EnumerateAudioDevices, Mode=OneWay}"
+                          SelectedValuePath="Key" DisplayMemberPath="Value"/>
+                <Button Grid.Column="1" Grid.Row="1"
+                        x:Name="AddFullscreenAudioDevice"
+                        Content="{DynamicResource LOCSwitchDisplayAdd}"
+                        HorizontalAlignment="Stretch" Margin="4,0,0,0"
+                        Click="AddFullscreenAudioDevice_Click" Width="100"/>
+            </Grid>
+
+            <TextBlock Text="{DynamicResource LOCSwitchDisplayDefaultAudioOutput}" Margin="0,8,0,2"/>
+            <ComboBox ItemsSource="{Binding EnumerateAudioDevices}"
+                      SelectedValue="{Binding DefaultAudioDevice, Mode=TwoWay}"
+                      SelectedValuePath="Key" DisplayMemberPath="Value"
+                      Margin="0,0,0,6"/>
+
+            <CheckBox IsChecked="{Binding AutoDetectAudioDevice}"
+                      Content="{DynamicResource LOCSwitchDisplayAutoDetectAudioOutput}"
+                      Margin="0,0,0,6"/>
+
+            <!-- Audio retry timeout -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <TextBlock Text="{DynamicResource LOCSwitchDisplayAudioRetryTimeout}"
+                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox Text="{Binding AudioRetryTimeoutSecs, Mode=TwoWay}"
+                         Width="50" VerticalAlignment="Center"/>
+                <TextBlock Text="s" VerticalAlignment="Center" Margin="4,0,0,0"/>
+            </StackPanel>
+
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>

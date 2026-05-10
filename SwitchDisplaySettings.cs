@@ -3,11 +3,9 @@ using Playnite.SDK;
 using Playnite.SDK.Data;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using NAudio.CoreAudioApi;
-using System.Collections.Specialized;
-using System.Windows;
-using System.Collections.ObjectModel;
 
 namespace SwitchDisplay
 {
@@ -15,49 +13,109 @@ namespace SwitchDisplay
     {
         private SwitchDisplay plugin;
 
+        // ---- Display settings ----------------------------------------------------------------
+
+        /// <summary>Device path of the monitor to set as primary in fullscreen (TV) mode.</summary>
         public string FullscreenDisplay { get; set; } = string.Empty;
+
+        /// <summary>Device path of the monitor to set as primary when returning to desktop.</summary>
         public string DefaultDisplay { get; set; } = string.Empty;
-        public string DefaultAudioDevice { get; set; } = string.Empty;
-        public ObservableCollection<KeyValuePair<string, string>> FullScreenAudioDeviceList { get; set; } = new ObservableCollection<KeyValuePair<string, string>>();
+
+        /// <summary>
+        /// Monitors that should always be disabled in fullscreen (TV) mode.
+        /// Key = DevicePath, Value = FriendlyName.
+        /// </summary>
+        public ObservableCollection<KeyValuePair<string, string>> DisableInFullscreenList { get; set; }
+            = new ObservableCollection<KeyValuePair<string, string>>();
+
+        /// <summary>
+        /// Monitors whose state should be preserved: if active before entering fullscreen,
+        /// they will be re-enabled on return; if already inactive, they remain off.
+        /// Key = DevicePath, Value = FriendlyName.
+        /// </summary>
+        public ObservableCollection<KeyValuePair<string, string>> PreserveStateList { get; set; }
+            = new ObservableCollection<KeyValuePair<string, string>>();
+
         public bool SwitchDisplays { get; set; } = true;
+
+        /// <summary>
+        /// Seconds to wait after activating the TV before applying further display changes.
+        /// Allows the TV time to be detected by Windows after HDMI signal appears.
+        /// </summary>
+        public int DisplayActivationDelaySecs { get; set; } = 3;
+
+        // ---- Audio settings ------------------------------------------------------------------
+
+        /// <summary>
+        /// Ordered list of preferred audio devices for fullscreen (TV) mode.
+        /// The first active device in the list will be used.
+        /// Key = device ID, Value = friendly name.
+        /// </summary>
+        public ObservableCollection<KeyValuePair<string, string>> FullScreenAudioDeviceList { get; set; }
+            = new ObservableCollection<KeyValuePair<string, string>>();
+
+        /// <summary>Device ID to restore when returning to desktop (if AutoDetect is off).</summary>
+        public string DefaultAudioDevice { get; set; } = string.Empty;
+
         public bool SwitchAudio { get; set; } = true;
+
+        /// <summary>
+        /// If true, the audio device active at the moment of entering fullscreen is saved
+        /// and automatically restored on exit, ignoring DefaultAudioDevice.
+        /// </summary>
         public bool AutoDetectAudioDevice { get; set; } = false;
 
-        [DontSerialize]
-        private Dictionary<string, string> _audioDevices;
+        /// <summary>
+        /// Seconds to keep retrying the audio switch after entering fullscreen.
+        /// The TV audio endpoint may not be ACTIVE immediately after display activation.
+        /// </summary>
+        public int AudioRetryTimeoutSecs { get; set; } = 15;
 
-        // Parameterless constructor required for LoadPluginSettings
-        public SwitchDisplaySettings()
-        {
-        }
+        // ---- Runtime state (not serialized) --------------------------------------------------
+
+        /// <summary>
+        /// Snapshot of which PreserveState monitors were active just before entering fullscreen.
+        /// Used to decide which ones to re-enable on exit.
+        /// </summary>
+        [DontSerialize]
+        public HashSet<string> PreserveStateWasActive { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        [DontSerialize]
+        private Dictionary<string, string> _audioDevicesCache;
+
+        // ---- Constructors --------------------------------------------------------------------
+
+        public SwitchDisplaySettings() { }
 
         public SwitchDisplaySettings(SwitchDisplay plugin)
         {
             this.plugin = plugin;
 
-            var savedSettings = plugin.LoadPluginSettings<SwitchDisplaySettings>();
-
-            if (savedSettings != null)
+            var saved = plugin.LoadPluginSettings<SwitchDisplaySettings>();
+            if (saved != null)
             {
-                FullscreenDisplay = savedSettings.FullscreenDisplay;
-                DefaultDisplay = savedSettings.DefaultDisplay;
-                DefaultAudioDevice = savedSettings.DefaultAudioDevice;
-                FullScreenAudioDeviceList = savedSettings.FullScreenAudioDeviceList;
-                SwitchDisplays = savedSettings.SwitchDisplays;
-                SwitchAudio = savedSettings.SwitchAudio;
-                AutoDetectAudioDevice = savedSettings.AutoDetectAudioDevice;
+                FullscreenDisplay = saved.FullscreenDisplay;
+                DefaultDisplay = saved.DefaultDisplay;
+                DisableInFullscreenList = saved.DisableInFullscreenList;
+                PreserveStateList = saved.PreserveStateList;
+                SwitchDisplays = saved.SwitchDisplays;
+                DisplayActivationDelaySecs = saved.DisplayActivationDelaySecs;
+                FullScreenAudioDeviceList = saved.FullScreenAudioDeviceList;
+                DefaultAudioDevice = saved.DefaultAudioDevice;
+                SwitchAudio = saved.SwitchAudio;
+                AutoDetectAudioDevice = saved.AutoDetectAudioDevice;
+                AudioRetryTimeoutSecs = saved.AudioRetryTimeoutSecs;
             }
         }
 
+        // ---- ISettings -----------------------------------------------------------------------
+
         public void BeginEdit()
         {
-            // Force refresh of audio devices when settings are opened
             RefreshAudioDevices();
         }
 
-        public void CancelEdit()
-        {
-        }
+        public void CancelEdit() { }
 
         public void EndEdit()
         {
@@ -70,24 +128,27 @@ namespace SwitchDisplay
             return true;
         }
 
-        /// <summary>
-        /// Clears the audio device cache so the next access re-enumerates.
-        /// Call this before switching audio to ensure IDs are current.
-        /// </summary>
-        public void RefreshAudioDevices()
-        {
-            _audioDevices = null;
-        }
+        // ---- Enumeration helpers (used by settings UI) ---------------------------------------
 
+        /// <summary>Active monitors — used to populate primary display dropdowns.</summary>
         [JsonIgnore]
         public Dictionary<string, string> EnumerateDisplays
         {
-            get => plugin.Handler.Enumerate().ToDictionary(
-                display => display.DeviceName,
-                display => String.Format(
-                    ResourceProvider.GetString("LOCSwitchDisplayDisplayString"),
-                    display.MonitorString,
-                    display.DeviceString));
+            get => plugin.Handler.EnumerateActive()
+                .ToDictionary(m => m.DevicePath, m => m.DisplayLabel);
+        }
+
+        /// <summary>
+        /// All known monitors (active + inactive) — used to populate the disable/preserve lists.
+        /// Shows "(offline)" suffix for inactive monitors.
+        /// </summary>
+        [JsonIgnore]
+        public Dictionary<string, string> EnumerateAllDisplays
+        {
+            get => plugin.Handler.EnumerateAll()
+                .ToDictionary(
+                    m => m.DevicePath,
+                    m => m.IsActive ? m.DisplayLabel : $"{m.DisplayLabel} (offline)");
         }
 
         [JsonIgnore]
@@ -95,53 +156,73 @@ namespace SwitchDisplay
         {
             get
             {
-                if (_audioDevices == null)
+                if (_audioDevicesCache == null)
                 {
                     try
                     {
-                        _audioDevices = plugin.AudioEnumerator
+                        _audioDevicesCache = plugin.AudioEnumerator
                             .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
-                            .ToDictionary(audio => audio.ID, audio => audio.FriendlyName);
+                            .ToDictionary(d => d.ID, d => d.FriendlyName);
                     }
-                    catch (Exception)
+                    catch
                     {
-                        _audioDevices = new Dictionary<string, string>();
+                        _audioDevicesCache = new Dictionary<string, string>();
                     }
                 }
-                return _audioDevices;
+                return _audioDevicesCache;
             }
+        }
+
+        public void RefreshAudioDevices() => _audioDevicesCache = null;
+
+        // ---- List mutation helpers (called from View code-behind) ----------------------------
+
+        public void AddDisableInFullscreen(string id, string name)
+        {
+            if (!string.IsNullOrEmpty(id) && !DisableInFullscreenList.Any(p => p.Key == id))
+                DisableInFullscreenList.Add(new KeyValuePair<string, string>(id, name));
+        }
+
+        public void RemoveDisableInFullscreenAt(int index)
+        {
+            if (index >= 0 && index < DisableInFullscreenList.Count)
+                DisableInFullscreenList.RemoveAt(index);
+        }
+
+        public void AddPreserveState(string id, string name)
+        {
+            if (!string.IsNullOrEmpty(id) && !PreserveStateList.Any(p => p.Key == id))
+                PreserveStateList.Add(new KeyValuePair<string, string>(id, name));
+        }
+
+        public void RemovePreserveStateAt(int index)
+        {
+            if (index >= 0 && index < PreserveStateList.Count)
+                PreserveStateList.RemoveAt(index);
         }
 
         public void AddFullscreenDeviceById(string id, string value)
         {
-            if (id.Length > 0 && !FullScreenAudioDeviceList.Any(p => p.Key == id))
-            {
+            if (!string.IsNullOrEmpty(id) && !FullScreenAudioDeviceList.Any(p => p.Key == id))
                 FullScreenAudioDeviceList.Add(new KeyValuePair<string, string>(id, value));
-            }
         }
 
         public void RemoveFullscreenDeviceByIndex(int index)
         {
-            if (index > -1 && FullScreenAudioDeviceList.Count > index)
-            {
+            if (index >= 0 && index < FullScreenAudioDeviceList.Count)
                 FullScreenAudioDeviceList.RemoveAt(index);
-            }
         }
 
         public void MoveFullscreenDeviceUp(int index)
         {
-            if (index > 0 && FullScreenAudioDeviceList.Count > index)
-            {
+            if (index > 0 && index < FullScreenAudioDeviceList.Count)
                 FullScreenAudioDeviceList.Move(index, index - 1);
-            }
         }
 
         public void MoveFullscreenDeviceDown(int index)
         {
-            if (index > -1 && FullScreenAudioDeviceList.Count - 1 > index)
-            {
+            if (index >= 0 && index < FullScreenAudioDeviceList.Count - 1)
                 FullScreenAudioDeviceList.Move(index + 1, index);
-            }
         }
     }
 }
