@@ -1,6 +1,7 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System;
 using System.Collections.Generic;
+
 namespace SwitchDisplay
 {
     public class DisplayHandler
@@ -8,95 +9,144 @@ namespace SwitchDisplay
         public List<DeviceInfo> Enumerate()
         {
             var displays = new List<DeviceInfo>();
-            DISPLAY_DEVICE display = new DISPLAY_DEVICE(DisplayDeviceStateFlags.AttachedToDesktop);
             uint displayIndex = 0;
-            while (EnumDisplayDevices(null, displayIndex, ref display, 0))
+
+            while (true)
             {
-                displayIndex++;
+                // Re-initialize display struct each iteration to avoid stale data
+                DISPLAY_DEVICE display = new DISPLAY_DEVICE();
                 display.cb = Marshal.SizeOf(display);
-                uint monitorIndex = 0;
-                DISPLAY_DEVICE monitor = new DISPLAY_DEVICE(DisplayDeviceStateFlags.AttachedToDesktop);
+
+                if (!EnumDisplayDevices(null, displayIndex, ref display, 0))
+                    break;
+
+                displayIndex++;
+
+                // Skip non-attached displays
+                if ((display.StateFlags & DisplayDeviceStateFlags.AttachedToDesktop) == 0)
+                    continue;
 
                 var devMode = new DEVMODE();
+                devMode.dmSize = (short)Marshal.SizeOf(devMode);
                 EnumDisplaySettings(display.DeviceName, -1, ref devMode);
 
-
-                while (EnumDisplayDevices(display.DeviceName, monitorIndex, ref monitor, 0))
+                uint monitorIndex = 0;
+                while (true)
                 {
+                    // Re-initialize monitor struct each iteration
+                    DISPLAY_DEVICE monitor = new DISPLAY_DEVICE();
+                    monitor.cb = Marshal.SizeOf(monitor);
+
+                    if (!EnumDisplayDevices(display.DeviceName, monitorIndex, ref monitor, 0))
+                        break;
+
                     monitorIndex++;
-                    displays.Add(new DeviceInfo {
+
+                    displays.Add(new DeviceInfo
+                    {
                         DeviceIndex = displayIndex,
                         DeviceName = display.DeviceName,
                         DeviceString = display.DeviceString,
+                        StateFlags = display.StateFlags,
                         MonitorIndex = monitorIndex,
                         MonitorName = monitor.DeviceName,
                         MonitorString = String.Format("{0} {1}x{2}", monitor.DeviceString, devMode.dmPelsWidth, devMode.dmPelsHeight)
                     });
-                    display.cb = Marshal.SizeOf(display);
                 }
-                
+
+                // If no monitors found for this adapter, add adapter entry anyway
+                if (monitorIndex == 0)
+                {
+                    displays.Add(new DeviceInfo
+                    {
+                        DeviceIndex = displayIndex,
+                        DeviceName = display.DeviceName,
+                        DeviceString = display.DeviceString,
+                        StateFlags = display.StateFlags,
+                        MonitorIndex = 0,
+                        MonitorName = string.Empty,
+                        MonitorString = String.Format("{0} {1}x{2}", display.DeviceString, devMode.dmPelsWidth, devMode.dmPelsHeight)
+                    });
+                }
             }
+
             return displays;
         }
 
         public bool SwitchPrimaryDisplay(string deviceName)
         {
             var displays = Enumerate();
-            var device = displays.Find(d => d.DeviceName.Equals(deviceName));
+            var device = displays.Find(d => d.DeviceName.Equals(deviceName, StringComparison.OrdinalIgnoreCase));
 
-            if(!device.DeviceName.Equals(deviceName))
+            // Struct default: DeviceName will be null/empty if not found
+            if (string.IsNullOrEmpty(device.DeviceName))
             {
                 return false;
             }
 
             var deviceMode = new DEVMODE();
-     
-            if (!EnumDisplaySettings(device.DeviceName, -1, ref deviceMode)){
+            deviceMode.dmSize = (short)Marshal.SizeOf(deviceMode);
+
+            if (!EnumDisplaySettings(device.DeviceName, -1, ref deviceMode))
+            {
                 return false;
             }
-            
+
             var offsetx = deviceMode.dmPosition.x;
             var offsety = deviceMode.dmPosition.y;
-            if(offsetx == 0 && offsety == 0)
+
+            // Already primary display
+            if (offsetx == 0 && offsety == 0)
             {
                 return true;
             }
+
             deviceMode.dmPosition.x = 0;
             deviceMode.dmPosition.y = 0;
+            deviceMode.dmFields |= DM_POSITION;
 
-            if(ChangeDisplaySettingsEx(
+            var result = ChangeDisplaySettingsEx(
                 device.DeviceName,
                 ref deviceMode,
                 (IntPtr)null,
                 (ChangeDisplaySettingsFlags.CDS_SET_PRIMARY | ChangeDisplaySettingsFlags.CDS_UPDATEREGISTRY | ChangeDisplaySettingsFlags.CDS_NORESET),
-                IntPtr.Zero) != DISP_CHANGE.Successful)
+                IntPtr.Zero);
+
+            if (result != DISP_CHANGE.Successful)
             {
                 return false;
             }
 
-            var otherDisplays = displays.FindAll(d => !d.DeviceName.Equals(deviceName));
+            // Adjust all other displays relative to the new primary
+            var otherDisplays = displays.FindAll(d => !d.DeviceName.Equals(deviceName, StringComparison.OrdinalIgnoreCase));
             foreach (var otherDisplay in otherDisplays)
             {
                 var otherMode = new DEVMODE();
-                if(!EnumDisplaySettings(otherDisplay.DeviceName, -1, ref otherMode))
+                otherMode.dmSize = (short)Marshal.SizeOf(otherMode);
+
+                if (!EnumDisplaySettings(otherDisplay.DeviceName, -1, ref otherMode))
                 {
-                    return false;
+                    continue; // Skip rather than fail completely
                 }
 
                 otherMode.dmPosition.x -= offsetx;
                 otherMode.dmPosition.y -= offsety;
-                if(ChangeDisplaySettingsEx(
+                otherMode.dmFields |= DM_POSITION;
+
+                ChangeDisplaySettingsEx(
                     otherDisplay.DeviceName,
                     ref otherMode,
                     (IntPtr)null,
                     (ChangeDisplaySettingsFlags.CDS_UPDATEREGISTRY | ChangeDisplaySettingsFlags.CDS_NORESET),
-                    IntPtr.Zero) != DISP_CHANGE.Successful)
-                {
-                    return false;
-                }
+                    IntPtr.Zero);
+                // Continue even if one display fails
             }
+
+            // Apply all changes at once
             return ChangeDisplaySettingsEx(null, IntPtr.Zero, (IntPtr)null, ChangeDisplaySettingsFlags.CDS_NONE, (IntPtr)null) == DISP_CHANGE.Successful;
         }
+
+        private const uint DM_POSITION = 0x00000020;
 
         [DllImport("user32.dll")]
         public static extern DISP_CHANGE ChangeDisplaySettingsEx(string lpszDeviceName, ref DEVMODE lpDevMode, IntPtr hwnd, ChangeDisplaySettingsFlags dwflags, IntPtr lParam);
@@ -119,6 +169,7 @@ namespace SwitchDisplay
         public string MonitorName;
         public uint MonitorIndex;
         public string MonitorString;
+        public DisplayDeviceStateFlags StateFlags;
     }
 
     [StructLayout(LayoutKind.Explicit, CharSet = CharSet.Ansi)]
@@ -130,66 +181,92 @@ namespace SwitchDisplay
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = CCHDEVICENAME)]
         [System.Runtime.InteropServices.FieldOffset(0)]
         public string dmDeviceName;
+
         [System.Runtime.InteropServices.FieldOffset(32)]
         public Int16 dmSpecVersion;
+
         [System.Runtime.InteropServices.FieldOffset(34)]
         public Int16 dmDriverVersion;
+
         [System.Runtime.InteropServices.FieldOffset(36)]
         public Int16 dmSize;
+
         [System.Runtime.InteropServices.FieldOffset(38)]
         public Int16 dmDriverExtra;
+
         [System.Runtime.InteropServices.FieldOffset(40)]
         public UInt32 dmFields;
 
         [System.Runtime.InteropServices.FieldOffset(44)]
         Int16 dmOrientation;
+
         [System.Runtime.InteropServices.FieldOffset(46)]
         Int16 dmPaperSize;
+
         [System.Runtime.InteropServices.FieldOffset(48)]
         Int16 dmPaperLength;
+
         [System.Runtime.InteropServices.FieldOffset(50)]
         Int16 dmPaperWidth;
+
         [System.Runtime.InteropServices.FieldOffset(52)]
         Int16 dmScale;
+
         [System.Runtime.InteropServices.FieldOffset(54)]
         Int16 dmCopies;
+
         [System.Runtime.InteropServices.FieldOffset(56)]
         Int16 dmDefaultSource;
+
         [System.Runtime.InteropServices.FieldOffset(58)]
         Int16 dmPrintQuality;
 
         [System.Runtime.InteropServices.FieldOffset(44)]
         public POINTL dmPosition;
+
         [System.Runtime.InteropServices.FieldOffset(52)]
         public Int32 dmDisplayOrientation;
+
         [System.Runtime.InteropServices.FieldOffset(56)]
         public Int32 dmDisplayFixedOutput;
 
         [System.Runtime.InteropServices.FieldOffset(60)]
-        public short dmColor; // See note below!
+        public short dmColor;
+
         [System.Runtime.InteropServices.FieldOffset(62)]
-        public short dmDuplex; // See note below!
+        public short dmDuplex;
+
         [System.Runtime.InteropServices.FieldOffset(64)]
         public short dmYResolution;
+
         [System.Runtime.InteropServices.FieldOffset(66)]
         public short dmTTOption;
+
         [System.Runtime.InteropServices.FieldOffset(68)]
-        public short dmCollate; // See note below!
+        public short dmCollate;
+
         [System.Runtime.InteropServices.FieldOffset(72)]
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = CCHFORMNAME)]
         public string dmFormName;
+
         [System.Runtime.InteropServices.FieldOffset(102)]
         public Int16 dmLogPixels;
+
         [System.Runtime.InteropServices.FieldOffset(104)]
         public Int32 dmBitsPerPel;
+
         [System.Runtime.InteropServices.FieldOffset(108)]
         public Int32 dmPelsWidth;
+
         [System.Runtime.InteropServices.FieldOffset(112)]
         public Int32 dmPelsHeight;
+
         [System.Runtime.InteropServices.FieldOffset(116)]
         public Int32 dmDisplayFlags;
+
         [System.Runtime.InteropServices.FieldOffset(116)]
         public Int32 dmNup;
+
         [System.Runtime.InteropServices.FieldOffset(120)]
         public Int32 dmDisplayFrequency;
     }
@@ -206,34 +283,26 @@ namespace SwitchDisplay
         BadDualView = -6
     }
 
-
-
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
     public struct DISPLAY_DEVICE
     {
         [MarshalAs(UnmanagedType.U4)]
         public int cb;
+
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string DeviceName;
+
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
         public string DeviceString;
+
         [MarshalAs(UnmanagedType.U4)]
         public DisplayDeviceStateFlags StateFlags;
+
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
         public string DeviceID;
+
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
         public string DeviceKey;
-
-        public DISPLAY_DEVICE(DisplayDeviceStateFlags flags)
-        {
-            cb = 0;
-            StateFlags = flags;
-            DeviceName = new string((char)32, 32);
-            DeviceString = new string((char)32, 128);
-            DeviceID = new string((char)32, 128);
-            DeviceKey = new string((char)32, 128);
-            cb = Marshal.SizeOf(this);
-        }
     }
 
     [Flags()]
@@ -273,5 +342,4 @@ namespace SwitchDisplay
         public int x;
         public int y;
     }
-
 }

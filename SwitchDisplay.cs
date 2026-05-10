@@ -1,4 +1,4 @@
-﻿using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi;
 using Playnite.SDK;
 using Playnite.SDK.Models;
 using Playnite.SDK.Plugins;
@@ -12,19 +12,15 @@ namespace SwitchDisplay
 {
     public class SwitchDisplay : GenericPlugin
     {
-
         private static readonly ILogger logger = LogManager.GetLogger();
 
         private SwitchDisplaySettings settings { get; set; }
-
         private IPlayniteAPI api { get; set; }
 
         public override Guid Id { get; } = Guid.Parse("75b4d2cc-8308-4c34-8aeb-4dd9a012586d");
 
         private PolicyConfigClient _policyConfigClient;
-
         public MMDeviceEnumerator AudioEnumerator { get; set; }
-
         public DisplayHandler Handler { get; set; }
 
         private string initialAudioDevice;
@@ -43,72 +39,116 @@ namespace SwitchDisplay
             };
         }
 
-
         public override void OnApplicationStarted(OnApplicationStartedEventArgs args)
         {
-            if(api.ApplicationInfo.Mode == ApplicationMode.Fullscreen)
+            if (api.ApplicationInfo.Mode == ApplicationMode.Fullscreen)
             {
-                //Display
+                // Switch Display
                 if (settings.SwitchDisplays && !String.IsNullOrEmpty(settings.FullscreenDisplay))
                 {
                     if (!Handler.SwitchPrimaryDisplay(settings.FullscreenDisplay))
                     {
                         logger.Error(String.Format("Error setting primary display: {0}", settings.FullscreenDisplay));
                     }
-
                 }
 
-                //Audio
+                // Switch Audio
                 if (settings.SwitchAudio && settings.FullScreenAudioDeviceList.Count > 0)
                 {
-                    //save current audio device ID before switching
+                    // Save current audio device ID before switching
                     if (settings.AutoDetectAudioDevice)
                     {
-                        initialAudioDevice = AudioEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia).ID;
+                        try
+                        {
+                            initialAudioDevice = AudioEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia).ID;
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Error(ex, "Failed to get current default audio endpoint.");
+                        }
                     }
 
-                    //search available device
-                    foreach(KeyValuePair<string, string> device in settings.FullScreenAudioDeviceList)
+                    // Refresh enumerated devices so IDs are current
+                    settings.RefreshAudioDevices();
+                    var currentDevices = settings.EnumerateAudioDevices;
+
+                    // Try each preferred device in priority order
+                    bool audioSwitched = false;
+                    foreach (KeyValuePair<string, string> device in settings.FullScreenAudioDeviceList)
                     {
-                        string id = "";
-                        if (settings.EnumerateAudioDevices.ContainsKey(device.Key))
+                        string targetId = null;
+
+                        // First try to match by ID (most reliable)
+                        if (currentDevices.ContainsKey(device.Key))
                         {
-                            id = device.Key;
-                        } else if (settings.EnumerateAudioDevices.ContainsValue(device.Value))
-                        {
-                            id = settings.EnumerateAudioDevices.First(p => p.Value == device.Value).Value;
+                            targetId = device.Key;
                         }
-                        if(id.Length > 0)
+                        // Fall back to matching by friendly name (handles device reconnection with new ID)
+                        else
                         {
-                            _policyConfigClient.SetDefaultEndpoint(id, Role.Multimedia);
+                            var byName = currentDevices.FirstOrDefault(p => p.Value.Equals(device.Value, StringComparison.OrdinalIgnoreCase));
+                            if (!string.IsNullOrEmpty(byName.Key))
+                            {
+                                targetId = byName.Key;
+                                logger.Warn(String.Format("Audio device ID changed, matched by name '{0}'. Old ID: {1}, New ID: {2}", device.Value, device.Key, targetId));
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(targetId))
+                        {
+                            try
+                            {
+                                _policyConfigClient.SetDefaultEndpoint(targetId, Role.Multimedia);
+                                _policyConfigClient.SetDefaultEndpoint(targetId, Role.Console);
+                                audioSwitched = true;
+                                logger.Info(String.Format("Switched audio to: {0} ({1})", device.Value, targetId));
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.Error(ex, String.Format("Failed to set audio endpoint: {0}", targetId));
+                            }
                             break;
                         }
-
                     }
 
+                    if (!audioSwitched)
+                    {
+                        logger.Warn("No matching audio device found for fullscreen mode.");
+                    }
                 }
             }
-
         }
 
         public override void OnApplicationStopped(OnApplicationStoppedEventArgs args)
         {
             if (api.ApplicationInfo.Mode == ApplicationMode.Fullscreen)
             {
-                //Display
+                // Restore Display
                 if (settings.SwitchDisplays && !String.IsNullOrEmpty(settings.DefaultDisplay))
                 {
                     if (!Handler.SwitchPrimaryDisplay(settings.DefaultDisplay))
                     {
-                        logger.Error(String.Format("Error setting primary display: {0}", settings.DefaultDisplay));
+                        logger.Error(String.Format("Error restoring primary display: {0}", settings.DefaultDisplay));
                     }
-
                 }
-                //Audio
-                if (settings.SwitchAudio && !String.IsNullOrEmpty(settings.DefaultAudioDevice))
+
+                // Restore Audio
+                if (settings.SwitchAudio)
                 {
-                    //switch back to initialAudioDevice if auto detect is enabled, otherwise siwtch back to settings.DefaultAudioDevice
-                    _policyConfigClient.SetDefaultEndpoint(settings.AutoDetectAudioDevice ? initialAudioDevice : settings.DefaultAudioDevice, Role.Multimedia);
+                    string restoreId = settings.AutoDetectAudioDevice ? initialAudioDevice : settings.DefaultAudioDevice;
+
+                    if (!string.IsNullOrEmpty(restoreId))
+                    {
+                        try
+                        {
+                            _policyConfigClient.SetDefaultEndpoint(restoreId, Role.Multimedia);
+                            _policyConfigClient.SetDefaultEndpoint(restoreId, Role.Console);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Error(ex, String.Format("Failed to restore audio endpoint: {0}", restoreId));
+                        }
+                    }
                 }
             }
         }
@@ -122,6 +162,5 @@ namespace SwitchDisplay
         {
             return new SwitchDisplaySettingsView(settings);
         }
-
     }
 }
