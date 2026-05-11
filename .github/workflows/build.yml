@@ -28,26 +28,43 @@ jobs:
       - name: Package as .pext
         shell: pwsh
         run: |
-          $outDir  = "bin\Release"
           $pextDir = "pext_staging"
-
-          # Playnite requires all files at the ROOT of the zip (no subfolder).
           New-Item -ItemType Directory -Force -Path $pextDir | Out-Null
 
-          # Copy compiled output
-          Copy-Item "$outDir\*" $pextDir -Recurse -Force
+          # Find the actual output folder (may be bin\Release or bin\Release\net472)
+          $outDir = "bin\Release"
+          $netDir = Get-ChildItem $outDir -Directory | Select-Object -First 1
+          if ($netDir) {
+            # Flatten: copy contents of net472 (or similar) directly to staging root
+            Copy-Item "$($netDir.FullName)\*" $pextDir -Recurse -Force
+          } else {
+            Copy-Item "$outDir\*" $pextDir -Recurse -Force
+          }
 
-          # Copy required Playnite extension metadata files
+          # Copy Playnite metadata to root (overwrite if already copied from bin)
           Copy-Item "extension.yaml" $pextDir -Force
           Copy-Item "icon.png"       $pextDir -Force
           Copy-Item "manifest.yaml"  $pextDir -ErrorAction SilentlyContinue -Force
 
-          # Copy Localization folder if it exists
+          # Copy Localization folder to root
           if (Test-Path "Localization") {
             Copy-Item "Localization" $pextDir -Recurse -Force
           }
 
-          # Zip the CONTENTS (not the folder itself) so files are at zip root
+          # Verify extension.yaml is at root
+          if (-not (Test-Path "$pextDir\extension.yaml")) {
+            Write-Error "extension.yaml not found at staging root!"
+            exit 1
+          }
+          if (-not (Test-Path "$pextDir\SwitchDisplay.dll")) {
+            Write-Error "SwitchDisplay.dll not found at staging root!"
+            exit 1
+          }
+
+          Write-Host "Staging contents:"
+          Get-ChildItem $pextDir -Recurse | Select-Object FullName
+
+          # Zip contents (not the folder) so files are at zip root
           $pextFile = "$PWD\SwitchDisplay.pext"
           Push-Location $pextDir
           Compress-Archive -Path ".\*" -DestinationPath $pextFile -Force
