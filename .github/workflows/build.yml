@@ -35,36 +35,38 @@ jobs:
           $outDir = "bin\Release"
           $netDir = Get-ChildItem $outDir -Directory | Select-Object -First 1
           if ($netDir) {
-            # Flatten: copy contents of net472 (or similar) directly to staging root
             Copy-Item "$($netDir.FullName)\*" $pextDir -Recurse -Force
           } else {
             Copy-Item "$outDir\*" $pextDir -Recurse -Force
           }
 
-          # Copy Playnite metadata to root (overwrite if already copied from bin)
+          # Copy required metadata to root
           Copy-Item "extension.yaml" $pextDir -Force
           Copy-Item "icon.png"       $pextDir -Force
-          Copy-Item "manifest.yaml"  $pextDir -ErrorAction SilentlyContinue -Force
 
-          # Copy Localization folder to root
+          # NOTE: manifest.yaml is NOT included in the .pext
+          # It is only used for the Playnite addon store, not for local installation
+
+          # Copy Localization folder
           if (Test-Path "Localization") {
             Copy-Item "Localization" $pextDir -Recurse -Force
           }
 
-          # Verify extension.yaml is at root
+          # Remove manifest.yaml if it was copied from bin output
+          Remove-Item "$pextDir\manifest.yaml" -ErrorAction SilentlyContinue
+
+          # Sanity checks
           if (-not (Test-Path "$pextDir\extension.yaml")) {
-            Write-Error "extension.yaml not found at staging root!"
-            exit 1
+            Write-Error "extension.yaml not found at staging root!"; exit 1
           }
           if (-not (Test-Path "$pextDir\SwitchDisplay.dll")) {
-            Write-Error "SwitchDisplay.dll not found at staging root!"
-            exit 1
+            Write-Error "SwitchDisplay.dll not found at staging root!"; exit 1
           }
 
-          Write-Host "Staging contents:"
-          Get-ChildItem $pextDir -Recurse | Select-Object FullName
+          Write-Host "=== Staging root contents ==="
+          Get-ChildItem $pextDir | Select-Object Name
 
-          # Zip contents (not the folder) so files are at zip root
+          # Zip contents so all files are at zip root
           $pextFile = "$PWD\SwitchDisplay.pext"
           Push-Location $pextDir
           Compress-Archive -Path ".\*" -DestinationPath $pextFile -Force
